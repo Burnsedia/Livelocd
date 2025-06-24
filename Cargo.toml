@@ -2,6 +2,15 @@
 name = "livelocd"
 version = "0.1.0"
 edition = "2024"
+authors = ["Bailey Burnsed <mail@baileyburnsed.dev>"]
+description = "A simple Axum plugin for real-time location tracking via WebSockets and JSON API."
+license = "MIT"
+repository = "https://github.com/Burnsedia/livelocd"
+homepage = "https://github.com/Burnsedia/livelocd"
+documentation = "https://docs.rs/livelocd"
+readme = "README.md"
+keywords = ["axum", "websockets", "realtime", "location", "plugin"]
+categories = ["network-programming", "web-programming::websocket", "api-bindings"]
 
 [dependencies]
 axum = { version = "0.7", features = ["ws"] }
