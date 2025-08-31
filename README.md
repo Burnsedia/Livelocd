@@ -118,3 +118,6 @@ MIT
 
 Pull requests welcome! Let’s make real-time dashboards in Rust even easier.
 
+
+[Made with Love by Bailey Burnsed](https://baileyburnsed.dev/)
+
