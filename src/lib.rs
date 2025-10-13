@@ -30,13 +30,26 @@
 //! ## License
 //! MIT © [Bailey Burnsed](https://github.com/Burnsedia)
 
+pub mod auth;
 mod handlers;
 mod state;
+
+use std::sync::Arc;
 
 use axum::{routing::get, Router};
 use handlers::*;
 
-pub fn routes() -> Router {
+pub use auth::{ClosureValidator, TokenValidator};
+
+/// Sets the token validator for authentication.
+/// This can only be called once.
+pub fn set_token_validator(validator: Arc<dyn TokenValidator>) {
+    if state::TOKEN_VALIDATOR.set(validator).is_err() {
+        panic!("Token validator has already been set.");
+    }
+}
+
+pub fn livelocd_routes() -> Router {
     Router::new()
         .route("/ws/send-location", get(send_location))
         .route("/ws/subscribe", get(subscribe_all))

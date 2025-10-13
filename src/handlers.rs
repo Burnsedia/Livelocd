@@ -1,22 +1,45 @@
+use crate::state::{LOCATION_BROADCAST, LOCATION_MAP, TOKEN_VALIDATOR};
 use axum::{
-    extract::{ws::{WebSocketUpgrade, Message}, Path},
+    extract::{
+        ws::{Message, WebSocketUpgrade},
+        Path,
+        Query,
+    },
     response::IntoResponse,
     Json,
 };
 use futures::StreamExt;
+use serde::Deserialize;
 use serde_json::Value;
+use std::sync::Arc;
 
-use crate::state::{LOCATION_MAP, LOCATION_BROADCAST};
+#[derive(Deserialize)]
+pub struct AuthQuery {
+    token: String,
+}
+
+fn get_validator() -> &'static Arc<dyn crate::auth::TokenValidator> {
+    TOKEN_VALIDATOR
+        .get()
+        .expect("Token validator has not been set. Please call `set_token_validator` first.")
+}
 
 /// Accepts WebSocket location updates as JSON
 /// Expected format: `{ "user_id": "user123", "location": "33.7,-84.3" }`
-pub async fn send_location(ws: WebSocketUpgrade) -> impl IntoResponse {
+pub async fn send_location(ws: WebSocketUpgrade, Query(auth): Query<AuthQuery>) -> impl IntoResponse {
+    if !get_validator().validate(&auth.token).await {
+        return axum::http::StatusCode::UNAUTHORIZED.into_response();
+    }
+
     ws.on_upgrade(|mut socket| async move {
         while let Some(Ok(Message::Text(text))) = socket.next().await {
             match serde_json::from_str::<Value>(&text) {
                 Ok(json) => {
                     if let Some(user_id) = json.get("user_id").and_then(|v| v.as_str()) {
-                        LOCATION_MAP.write().unwrap().insert(user_id.to_string(), json.clone());
+                        LOCATION_MAP
+                            .write()
+                            .unwrap()
+                            .insert(user_id.to_string(), json.clone());
                         let _ = LOCATION_BROADCAST.send((user_id.to_string(), json));
                     }
                 }
@@ -26,10 +49,18 @@ pub async fn send_location(ws: WebSocketUpgrade) -> impl IntoResponse {
             }
         }
     })
+    .into_response()
 }
 
 /// Broadcasts every user update to all subscribers
-pub async fn subscribe_all(ws: WebSocketUpgrade) -> impl IntoResponse {
+pub async fn subscribe_all(
+    ws: WebSocketUpgrade,
+    Query(auth): Query<AuthQuery>,
+) -> impl IntoResponse {
+    if !get_validator().validate(&auth.token).await {
+        return axum::http::StatusCode::UNAUTHORIZED.into_response();
+    }
+
     ws.on_upgrade(|mut socket| async move {
         let mut rx = LOCATION_BROADCAST.subscribe();
         while let Ok((_user_id, json)) = rx.recv().await {
@@ -39,10 +70,19 @@ pub async fn subscribe_all(ws: WebSocketUpgrade) -> impl IntoResponse {
             }
         }
     })
+    .into_response()
 }
 
 /// Subscribes to updates for a specific user
-pub async fn subscribe_one(Path(user_id): Path<String>, ws: WebSocketUpgrade) -> impl IntoResponse {
+pub async fn subscribe_one(
+    Path(user_id): Path<String>,
+    ws: WebSocketUpgrade,
+    Query(auth): Query<AuthQuery>,
+) -> impl IntoResponse {
+    if !get_validator().validate(&auth.token).await {
+        return axum::http::StatusCode::UNAUTHORIZED.into_response();
+    }
+
     ws.on_upgrade(|mut socket| async move {
         let mut rx = LOCATION_BROADCAST.subscribe();
         while let Ok((id, json)) = rx.recv().await {
@@ -54,6 +94,7 @@ pub async fn subscribe_one(Path(user_id): Path<String>, ws: WebSocketUpgrade) ->
             }
         }
     })
+    .into_response()
 }
 
 /// Returns all currently tracked user locations
@@ -70,4 +111,3 @@ pub async fn get_user(Path(user_id): Path<String>) -> impl IntoResponse {
         None => axum::http::StatusCode::NOT_FOUND.into_response(),
     }
 }
-
