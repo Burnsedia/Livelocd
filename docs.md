@@ -1,107 +1,169 @@
 # Livelocd Documentation
 
-**Livelocd** is a lightweight plugin for [Axum](https://github.com/tokio-rs/axum) that enables **real-time location tracking** using WebSockets.
+**Livelocd** is a lightweight, Axum-compatible plugin for real-time location tracking via WebSockets and a JSON API. It's designed to be easily integrated into any Rust backend for applications like live geolocation dashboards, game user tracking, or delivery fleet monitoring.
 
-## 🔧 Installation
+## Features
+
+- **Real-time Location Updates:** Send and receive location data using WebSockets.
+- **Flexible Subscriptions:** Subscribe to location updates for all users or specific users.
+- **RESTful API:** Query for the current locations of all users or individual users.
+- **Token-Based Authentication:** Secure your WebSocket connections with a flexible token validation system.
+- **Minimal Dependencies:** Built with a small footprint, relying on `tokio`, `axum`, and `serde_json`.
+
+## Installation
+
+Add `livelocd` to your `Cargo.toml` dependencies:
 
 ```toml
-# Cargo.toml
 [dependencies]
-livelocd = "0.1.0"
+livelocd = { git = "https://github.com/Burnsedia/livelocd" }
+# Or, if published on crates.io:
+# livelocd = "0.1.0"
 ```
 
-## 🚀 Features
+## Getting Started
 
-- Realtime WebSocket tracking for any client
-- Broadcast to all clients or to individual subscribers
-- JSON API to fetch user location(s)
-- Built on Axum and Tokio — fast and async-native
-- Easily embeddable in other projects
-
----
-
-## 📦 Usage
+To get started, add the `livelocd` routes to your Axum router.
 
 ```rust
-use axum::{Router};
-use livelocd::livelocd_routes;
+use axum::Router;
+use livelocd::{livelocd_routes, set_token_validator, ClosureValidator};
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() {
+    // --- 1. Set up your token validator ---
+    // For demonstration, we'll allow any token that starts with "valid-".
+    // In a real application, you would implement proper token validation.
+    let validator = ClosureValidator::new(|token: String| token.starts_with("valid-"));
+    set_token_validator(Arc::new(validator));
+
+    // --- 2. Add the livelocd routes to your application ---
     let app = Router::new().merge(livelocd_routes());
 
-    axum::Server::bind(&"0.0.0.0:3000".parse().unwrap())
-        .serve(app.into_make_service())
-        .await
-        .unwrap();
+    // --- 3. Start your Axum server ---
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    println!("Listening on: {}", listener.local_addr().unwrap());
+    axum::serve(listener, app).await.unwrap();
 }
 ```
 
----
+## Authentication
 
-## 📡 WebSocket Endpoints
+Livelocd uses a `TokenValidator` trait to authenticate WebSocket connections. You must set a validator using the `set_token_validator` function before your application starts.
 
-### `GET /ws/send-location`
+### `TokenValidator` Trait
 
-Send JSON objects from clients in the following format:
+You can implement the `TokenValidator` trait to create your own custom authentication logic.
 
-```json
-{
-  "user_id": "user123",
-  "location": "33.7489954,-84.3879824"
+```rust
+use axum::async_trait;
+use livelocd::TokenValidator;
+
+struct MyCustomValidator;
+
+#[async_trait]
+impl TokenValidator for MyCustomValidator {
+    async fn validate(&self, token: &str) -> bool {
+        // Your custom token validation logic here
+        // For example, check against a database or an auth service
+        token == "secret-token"
+    }
 }
+
+// Set the validator at startup
+// set_token_validator(Arc::new(MyCustomValidator));
 ```
 
-### `GET /ws/subscribe`
+### `ClosureValidator`
 
-Broadcasts **all user locations** to subscribers in real-time.
+For simpler validation logic, you can use the `ClosureValidator`.
 
-### `GET /ws/subscribe/:user_id`
+```rust
+use livelocd::{set_token_validator, ClosureValidator};
+use std::sync::Arc;
 
-Broadcasts updates only for a **specific user**.
-
----
-
-## 📊 REST API Endpoints
-
-### `GET /api/users`
-
-Returns a JSON map of all users and their last known locations:
-
-```json
-{
-  "user123": "33.7489954,-84.3879824",
-  "user456": "40.712776,-74.005974"
-}
+let validator = ClosureValidator::new(|token: String| {
+    token.starts_with("user-")
+});
+set_token_validator(Arc::new(validator));
 ```
 
-### `GET /api/users/:user_id`
+## API Reference
 
-Returns a single user’s location:
+### WebSocket API
 
-```json
-{
-  "user_id": "user123",
-  "location": "33.7489954,-84.3879824"
-}
+All WebSocket endpoints require a `token` query parameter for authentication.
+
+- **`GET /ws/send-location?token=<your-token>`**
+  
+  Send location updates to the server. The server expects JSON messages with a `user_id` and a `location`.
+
+  **Example JSON Payload:**
+  ```json
+  {
+    "user_id": "user123",
+    "location": {
+      "lat": 33.7489954,
+      "lng": -84.3879824
+    },
+    "status": "online"
+  }
+  ```
+
+- **`GET /ws/subscribe?token=<your-token>`**
+
+  Subscribe to real-time location updates for all users.
+
+- **`GET /ws/subscribe/:user_id?token=<your-token>`**
+
+  Subscribe to real-time location updates for a specific user.
+
+### REST API
+
+- **`GET /api/users`**
+
+  Get the current known locations for all users.
+
+  **Example Response:**
+  ```json
+  {
+    "user123": {
+      "location": { "lat": 33.7489954, "lng": -84.3879824 },
+      "status": "online",
+      "user_id": "user123"
+    }
+  }
+  ```
+
+- **`GET /api/users/:user_id`**
+
+  Get the most recent location for a single user.
+
+## State Management
+
+Livelocd maintains an in-memory store of user locations.
+
+- **`LOCATION_MAP`**: A `RwLock<HashMap<String, Value>>` that stores the latest JSON payload for each `user_id`.
+- **`LOCATION_BROADCAST`**: A `tokio::sync::broadcast` channel that fans out location updates to all subscribers.
+
+## Testing
+
+You can use a command-line tool like `websocat` to test the WebSocket endpoints.
+
+**1. Send a Location:**
+```bash
+websocat "ws://localhost:3000/ws/send-location?token=valid-token"
+# After connecting, paste and send the JSON payload:
+{ "user_id": "car-1", "location": { "lat": 40.7, "lng": -74.0 } }
 ```
 
----
+**2. Subscribe to All Locations:**
+```bash
+websocat "ws://localhost:3000/ws/subscribe?token=valid-token"
+# You will receive location updates as they are sent.
+```
 
-## 🧩 Integration Ideas
+## License
 
-- Live delivery driver tracking
-- Real-time multiplayer player positions
-- IoT device geolocation
-- Emergency response dashboards
-
----
-
-## ⚖ License
-
-MIT © [Bailey Burnsed](https://github.com/Burnsedia)
-
-## 🔗 Repository
-
-[https://github.com/Burnsedia/livelocd](https://github.com/Burnsedia/livelocd)
-
+This project is licensed under the MIT License.
