@@ -6,11 +6,16 @@
 
 ## ✨ Features
 
-- 📡 WebSocket support for sending real-time location updates  
-- 👂 Subscribe to all users or individual users' locations  
-- 🌐 REST API to query current locations  
-- 🧩 Designed as a plugin for Axum or Loco.rs apps  
-- ⚡ Built with minimal dependencies, powered by `tokio`, `axum`, and `serde_json`  
+- 📡 WebSocket support for sending real-time location updates
+- 👂 Subscribe to all users or individual users' locations
+- 🌐 REST API to query current locations
+- 🔐 **Token-based authentication** for WebSocket connections
+- 🧩 Designed as a plugin for Axum apps
+- ⚡ Built with minimal dependencies, powered by `tokio`, `axum`, and `serde_json`
+
+---
+
+## 📚 For detailed documentation, please see [docs.md](docs.md).
 
 ---
 
@@ -19,7 +24,8 @@
 In your project’s `Cargo.toml`:
 
 ```toml
-livelocd = { path = "../livelocd" } # or use Git/crates.io in the future
+[dependencies]
+livelocd = { git = "https://github.com/Burnsedia/livelocd" }
 ```
 
 ---
@@ -30,15 +36,22 @@ In your Axum project:
 
 ```rust
 use axum::Router;
-use livelocd::livelocd_routes;
+use livelocd::{livelocd_routes, set_token_validator, ClosureValidator};
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() {
+    // 1. Set up your token validator
+    let validator = ClosureValidator::new(|token: String| token.starts_with("valid-"));
+    set_token_validator(Arc::new(validator));
+
+    // 2. Add the livelocd routes
     let app = Router::new().merge(livelocd_routes());
-    axum::Server::bind(&"0.0.0.0:3000".parse().unwrap())
-        .serve(app.into_make_service())
-        .await
-        .unwrap();
+
+    // 3. Start the server
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    println!("Listening on: {}", listener.local_addr().unwrap());
+    axum::serve(listener, app).await.unwrap();
 }
 ```
 
@@ -46,9 +59,11 @@ async fn main() {
 
 ## 📡 WebSocket Endpoints
 
-- `GET /ws/send-location` — Send JSON with a `user_id` and any arbitrary fields (e.g., lat/lng)  
-- `GET /ws/subscribe` — Receive real-time updates for all users  
-- `GET /ws/subscribe/:user_id` — Subscribe to updates for a specific user  
+All WebSocket endpoints require a `token` query parameter.
+
+- `GET /ws/send-location?token=<your-token>` — Send JSON with a `user_id` and any arbitrary fields (e.g., lat/lng)
+- `GET /ws/subscribe?token=<your-token>` — Receive real-time updates for all users
+- `GET /ws/subscribe/:user_id?token=<your-token>` — Subscribe to updates for a specific user
 
 ### Example JSON payload:
 
@@ -65,23 +80,8 @@ async fn main() {
 
 ## 🔍 REST API Endpoints
 
-- `GET /api/users` — Get current known location for all users  
-- `GET /api/users/:user_id` — Get most recent location for a single user  
-
----
-
-## 🔒 Privacy & Security
-
-You are responsible for securing the WebSocket and API endpoints (auth, rate limiting, etc.) based on your use case.
-
----
-
-## 🚀 Use Cases
-
-- Live fleet or delivery tracking  
-- Multiplayer game player positions  
-- Dashboards for location-aware apps  
-- IoT geolocation feeds  
+- `GET /api/users` — Get current known location for all users
+- `GET /api/users/:user_id` — Get most recent location for a single user
 
 ---
 
@@ -91,20 +91,21 @@ Use [`websocat`](https://github.com/vi/websocat):
 
 ```bash
 # Send location
-websocat ws://localhost:3000/ws/send-location
+websocat "ws://localhost:3000/ws/send-location?token=valid-token"
+# Then, send the JSON payload:
 {"user_id": "car-1", "lat": 40.7, "lng": -74.0}
 
 # Subscribe to all
-websocat ws://localhost:3000/ws/subscribe
+websocat "ws://localhost:3000/ws/subscribe?token=valid-token"
 ```
 
 ---
 
 ## 🛠 Built With
 
-- [Axum](https://github.com/tokio-rs/axum)  
-- [Serde](https://serde.rs/)  
-- [Tokio](https://tokio.rs/)  
+- [Axum](https://github.com/tokio-rs/axum)
+- [Serde](https://serde.rs/)
+- [Tokio](https://tokio.rs/)
 
 ---
 
@@ -120,4 +121,3 @@ Pull requests welcome! Let’s make real-time dashboards in Rust even easier.
 
 
 [Made with Love by Bailey Burnsed](https://baileyburnsed.dev/)
-
